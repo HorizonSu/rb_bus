@@ -10,7 +10,7 @@
 #include <linux/gpio.h>
 #include <asm/uaccess.h>
 
-#define DEBUG       0                       /* 调试信息开关 */
+#define DEBUG       1                       /* 调试信息开关 */
 #define DEVICE_NAME "rb_dev"                /* 设备文件名 */
 #define BUFF_SIZE   512//1024                    /* 缓冲区大小 */
 
@@ -85,65 +85,6 @@ static void rb_free_bus(void)
     return;
 }
 
-//wpb add: 
-static int rb_Init_bus(void)
-{
-
-    gpio_direction_input(BUSY_IO);
-    gpio_direction_input(CLK_IO);
-    gpio_direction_output(DATA_IO, 0);
-
-	if(rb_irq_ctrl(1) !=0)	//wpb add
-	{
-		DBG_MSG("\n!rb_Init_bus===> rb_irq_ctrl(1): failed \n");//wpb add
-		return -1;
-	}
-
-    return 0;
-}
-
-//wpb add: 
-/*
-static void rb_IO_test(void)
-{
-	int cnt = 10;
-	int value = 0;
-
-// interrupt gpio must be free_irq before it works as an GPIO
-free_irq(BUSY_IRQ, rb);
-//disable_irq(BUSY_IRQ);// 将关闭硬件中断并等待（可能有的）中断处理完成才返回。
-
-    gpio_direction_output(BUSY_IO,0);
-    gpio_direction_output(CLK_IO,0);
-    gpio_direction_output(DATA_IO, 0);
-
-	while(cnt--)
-	{
-		gpio_direction_output(BUSY_IO,value);
-		gpio_direction_output(CLK_IO,value);
-		gpio_direction_output(DATA_IO, value);
-		//gpio_set_value(BUSY_IO, value);
-		//gpio_set_value(CLK_IO, value);
-		//gpio_set_value(DATA_IO, value);
-
-		udelay(1000);
-		value = (value==0)  ? 1 : 0;		
-
-	}
-
-//	gpio_set_value(BUSY_IO, 0);	//BAD set to input gpio
-//	gpio_set_value(CLK_IO, 0);
-//	gpio_set_value(DATA_IO, 0);
-
-
-    return;
-}
-*/
-
-
-
-
-
 /* 检测RB总线是否忙 */
 static int rb_ask_bus(void)
 {
@@ -155,7 +96,7 @@ static int rb_ask_bus(void)
         udelay(50);
         count++;
     }
-    
+
     udelay(50);
     count = 0;
 
@@ -165,7 +106,7 @@ static int rb_ask_bus(void)
         udelay(50);
         count++;
     }
-    
+
     gpio_direction_output(BUSY_IO, 0);
 
     return 0;
@@ -175,35 +116,28 @@ bus_busy:
 }
 
 /* 发送一个字节 */
-static int rb_send_byte(unsigned char dat) 
+static int rb_send_byte(unsigned char dat)
 {
     int count = 0;
     int i = 0;
 
-//DBG_MSG("\n!==========> rb_send_byte: start \n");//wpb add
-    gpio_direction_output(BUSY_IO, 0);//BUSY=0
-    gpio_direction_input(CLK_IO);	// CLK=1
-    gpio_direction_input(DATA_IO);	// DATA=1
+    gpio_direction_output(BUSY_IO, 0);
+    gpio_direction_input(CLK_IO);
+    gpio_direction_input(DATA_IO);
 
-//DBG_MSG("\n!==========> rb_send_byte: 1 \n");//wpb add    
     while (gpio_get_value(DATA_IO) == 0) {
-        if (count >=1000)
-		{
+        if (count >= 2000) {
             goto err_bus;
-		}
-       	udelay(10);
+        }
+        udelay(5);
         count++;
     }
 
-
-//DBG_MSG("\n!==========> rb_send_byte: 2 \n");//wpb add
     for (i = 0; i < 8; i++) {
         if (dat & 0x80)
             gpio_direction_input(DATA_IO);
         else
             gpio_direction_output(DATA_IO, 0);
-
-//DBG_MSG("\n!==========> rb_send_byte: 3 \n");//wpb add
 
         dat <<= 1;
         gpio_direction_output(CLK_IO, 0);
@@ -211,32 +145,24 @@ static int rb_send_byte(unsigned char dat)
         gpio_direction_input(CLK_IO);
         if (i != 7)
             udelay(25);
-//DBG_MSG("\n!==========> rb_send_byte: 4 \n");//wpb add
-            
+
         count = 0;
         while (gpio_get_value(CLK_IO) == 0) {
-            if (count >= 1000)
+            if (count >= 2000)
                 goto err_bus;
-            udelay(10);
+            udelay(5);
             count++;
         }
     }
 
-//DBG_MSG("\n!==========> rb_send_byte: 5-end \n");//wpb add
-    
-    gpio_direction_input(BUSY_IO);		//BUSY=1
-    gpio_direction_output(CLK_IO, 0);	//CLK=0
-    gpio_direction_input(DATA_IO);		//DATA=1
-
-//DBG_MSG("\n!==========> rb_send_byte: 5-end \n");//wpb add
+    gpio_direction_input(BUSY_IO);
+    gpio_direction_output(CLK_IO, 0);
+    gpio_direction_input(DATA_IO);
 
     return 0;
 
 err_bus:
     rb_free_bus();
-
-DBG_MSG("\n!==========> rb_send_byte:err_bus end \n");//wpb add
-
     return -1;
 }
 
@@ -246,8 +172,7 @@ static int rb_send(unsigned char *dat, unsigned char num)
     int ret = 0;
     int i = 0;
 
-	//    disable_irq(BUSY_IRQ);
-	rb_irq_ctrl(0); //wpb add: disable irq
+    rb_irq_ctrl(0);
 
     if (rb_ask_bus() == 1) {
         ret = -1;
@@ -259,81 +184,62 @@ static int rb_send(unsigned char *dat, unsigned char num)
             ret = i;
             goto done_send;
         }
-//DBG_MSG("\n!==========> rb_send: 1 \n");//wpb add
 
         udelay(100);
     }
 
-    rb_free_bus(); //wpb zhushi: if this command enable, 
-					//it will generate many pulse on BUSY IO
+    rb_free_bus();
+
     ret = num;
-//DBG_MSG("\n!==========> rb_send: 2 \n");//wpb add
 
 done_send:
-	//    enable_irq(BUSY_IRQ);
-	rb_irq_ctrl(1); //wpb add: enable irq
-//DBG_MSG("\n!==========> rb_send: 3 \n");//wpb add
+    rb_irq_ctrl(1);
 
     return ret;
 }
 
 /* 读取一个字节 */
-static int rb_read_byte(unsigned char *dat) 
+static int rb_read_byte(unsigned char *dat)
 {
     int ret = -1;
     int count = 0;
     int i = 0;
-
-//DBG_MSG("\n!==========> rb_read_byte: 1 \n");//wpb add
 
     if (gpio_get_value(BUSY_IO) != 0)
         goto done_read;
 
     gpio_direction_input(DATA_IO);
     gpio_direction_output(BUSY_IO, 0);
-	gpio_direction_input(CLK_IO);	//wpb add
-
-//disable_irq_nosync(BUSY_IRQ);//wpb: can not and no need used in ISR
-
-//DBG_MSG("\n!==========> rb_read_byte: 2 \n");//wpb add
+    gpio_direction_input(CLK_IO);
 
     for (i = 0; i < 8; i++) {
         count = 0;
         while (gpio_get_value(CLK_IO) != 0) {
-            if (count >= 1000)
+            if (count >= 2000)
                 goto done_read;
-            udelay(10);
+            udelay(5);
             count++;
         }
-
-//DBG_MSG("\n!==========> rb_read_byte: 4 \n");//wpb add
 
         gpio_direction_output(CLK_IO, 0);
         gpio_direction_input(DATA_IO);
         udelay(25);
         *dat <<= 1;
-        *dat |= (unsigned char)gpio_get_value(DATA_IO) & 0x01;
+        *dat |= (unsigned char)gpio_get_value(DATA_IO);
         gpio_direction_input(CLK_IO);
 
-//DBG_MSG("\n!==========> rb_read_byte: 5 \n");//wpb add
-
         count = 0;
-        while (gpio_get_value(CLK_IO) == 0) {
-            if (count >= 1000)
+        while (gpio_get_value(CLK_IO) != 1) {
+            if (count >= 2000)
                 goto done_read;
-            udelay(10);
+            udelay(5);
             count++;
         }
     }
     ret = 0;
 
-//DBG_MSG("\n!==========> rb_read_byte: 6 \n");//wpb add
-
 done_read:
     rb_free_bus();
-//    enable_irq(BUSY_IRQ);	//wpb: can not and no need used in ISR
-
-
 
     return ret;
 }
@@ -344,101 +250,76 @@ static irqreturn_t rb_irq(int irq, void *dev)
     unsigned char dat = 0;
     struct rb_dev *p = (struct rb_dev *)dev;
 
- //   disable_irq(BUSY_IRQ);	//wpb: can not used in ISR
-//DBG_MSG("\n!==========> rb_irq-begin \n");//wpb add
-     
     if (rb_read_byte(&dat) == 0)
         kfifo_put(&p->rxfifo, &dat);
-//DBG_MSG("\n!==========> rb_irq-end=%x \n",dat);//wpb add
 
     return IRQ_HANDLED;
 }
 
-
-//wpb add:
-// sw=0, disable irq 
-// sw=1, enbale  irq 
+/*
+ * 中断开关函数
+ * @sw : 0 —— 禁止中断
+ *       1 —— 使能中断
+ * 成功返回0，失败返回错误码
+ */
 static int rb_irq_ctrl(bool sw)
 {
-	//remember the status of irq 
-	static int irq_Flag = 0; // 0-disable, 1-enable
-	int ret;
+    static int irq_Flag = 0;        /* 当前中断状态：0 —— 关闭  1 —— 开启 */
+    int ret;
 
-	// enable irq
-	if(sw == 1)
-	{
-	 	if(irq_Flag == 0) // irq previous has been disabled 
-		{
-			if ((ret = request_irq(BUSY_IRQ, rb_irq, IRQF_TRIGGER_FALLING, DEVICE_NAME, rb)) != 0)
-			 {
-				DBG_MSG("\n!rb_irq_ctrl===> request_irq: failed \n");//wpb add
-				return ret;
-			 }	
-//DBG_MSG("\n!rb_irq_ctrl=1 \n");//wpb add
-			disable_irq_nosync(BUSY_IRQ);//强行关闭指定中断，不会等待当前中断处理程序执行完毕。，立即返回
-//DBG_MSG("\n!rb_irq_ctrl=2 \n");//wpb add
-		 	enable_irq(BUSY_IRQ);
-//DBG_MSG("\n!rb_irq_ctrl=3 \n");//wpb add
+    if (sw == 1) {
+        if(irq_Flag == 0) {
+            if ((ret = request_irq(BUSY_IRQ, rb_irq, IRQF_TRIGGER_FALLING, DEVICE_NAME, rb)) != 0) {
+                DBG_MSG("\n!================================> request_irq: failed \n");
+                return ret;
+            }
 
-		}
-		irq_Flag = 1;// remember the status of irq
-	}
-	// disable irq
-	else
-	{
-	 	if(irq_Flag == 1) // irq previous has been enabled
-		{
-			//disable_irq(BUSY_IRQ);// 将关闭硬件中断并等待（可能有的）中断处理完成才返回。
-			disable_irq_nosync(BUSY_IRQ);//强行关闭指定中断，不会等待当前中断处理程序执行完毕。，立即返回
-			free_irq(BUSY_IRQ, rb);		 //释放中断
-		}
-		irq_Flag = 0;// remember the status of irq
-	}
-	return 0;
+            disable_irq_nosync(BUSY_IRQ);   /* 强行关闭指定中断，立即返回，不会等待当前中断处理程序执行完毕。 */
+            enable_irq(BUSY_IRQ);
+        }
+
+        irq_Flag = 1;
+    } else {
+        if(irq_Flag == 1) {
+            disable_irq_nosync(BUSY_IRQ);   /* 强行关闭指定中断，立即返回，不会等待当前中断处理程序执行完毕。 */
+            free_irq(BUSY_IRQ, rb);
+        }
+
+        irq_Flag = 0;
+    }
+    return 0;
 }
 
-
-/* 数据发送tasklet */
+/* 数据发送 */
 static void do_send(unsigned long data)
-{ 
+{
     int len = 0;
     int ret = 0;
-//    unsigned char *buff;
     unsigned char buff[BUFF_SIZE]={0};
-
-//    if ((buff = kmalloc(BUFF_SIZE, GFP_KERNEL)) == NULL)
-//        return;
 
     if (kfifo_is_empty(&rb->txfifo))
         return;
 
     len = kfifo_out(&rb->txfifo, buff, kfifo_len(&rb->txfifo));
 
-	//wpb add
-	ret = rb_send(buff, len);
-	if (ret == -1)
-		DBG_MSG("\n!rb_send:failed end\n");
-/*
-    do {
-        ret = rb_send(buff, len);
-        if (ret == -1)
-            udelay(500);
-        else
-            len -= ret;
-    } while (len == 0);
-*/
-
-//    kfree(buff);
+    ret = rb_send(buff, len);
+    if (ret == -1)
+        DBG_MSG("\n!================================> rb_send:failed end\n");
 
     return;
 }
-DECLARE_TASKLET(send_tasklet, do_send, 0);
 
 static int rb_dev_open(struct inode *inode, struct file *filp)
 {
     DBG_MSG("\n!================================> rb_dev_open()\n");
 
-	rb_Init_bus();//wpb add
+    rb_free_bus();
+    kfifo_reset(&rb->txfifo);
+
+    if(rb_irq_ctrl(1) != 0) {
+        DBG_MSG("\n!================================> rb_irq_ctrl(1): failed \n");
+        return -1;
+    }
 
     return mutex_trylock(&rb_mtx) ? 0 : -EBUSY;
 }
@@ -449,7 +330,6 @@ static ssize_t rb_dev_read(struct file *filp, char __user *buff, size_t count, l
 
     if (kfifo_to_user(&rb->rxfifo, buff, count, &n) != 0)
         return -EFAULT;
-
 
     DBG_MSG("\n!================================> rb_dev_read()\n");
 
@@ -463,8 +343,7 @@ static ssize_t rb_dev_write(struct file *filp, const char __user *buff, size_t c
     if (kfifo_from_user(&rb->txfifo, buff, count, &n) != 0)
         return -EFAULT;
 
-//    tasklet_schedule(&send_tasklet);
-	do_send(0); //wpb add
+    do_send(0);
 
     DBG_MSG("\n!================================> rb_dev_write()\n");
 
@@ -473,6 +352,9 @@ static ssize_t rb_dev_write(struct file *filp, const char __user *buff, size_t c
 
 static int rb_dev_release(struct inode *inode, struct file *filp)
 {
+    rb_irq_ctrl(0);
+
+    kfifo_reset(&rb->rxfifo);
     mutex_unlock(&rb_mtx);
 
     DBG_MSG("\n!================================> rb_dev_release()\n");
@@ -547,23 +429,17 @@ static int  __init rb_dev_init(void)
 
     if ((ret = rb_gpio_set()) != 0)
         return ret;
-    
-//    if ((ret = request_irq(BUSY_IRQ, rb_irq, IRQF_TRIGGER_FALLING, DEVICE_NAME, rb)) != 0)
-//        return ret;
-
 
     mutex_init(&rb_mtx);
 
     DBG_MSG("\n!================================> rb_dev_init()\n");
-    
+
     return misc_register(&rb->rb_misc);
 }
 
 static void __exit rb_dev_exit(void)
 {
     misc_deregister(&rb->rb_misc);
-//    free_irq(BUSY_IRQ, rb); 
-	rb_irq_ctrl(0);	//wpb add 
     rb_gpio_free();
     rb_dev_destroy();
 
